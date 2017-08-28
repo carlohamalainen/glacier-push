@@ -250,7 +250,7 @@ main = do
 
     let vault = cs vault'
 
-    let myPartSize = 1024*oneMb
+    let myPartSize = 128*oneMb
 
     env <- myEnv
     mu  <- initiateMulti env region vault myPartSize
