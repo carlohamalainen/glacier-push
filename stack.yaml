@@ -2,11 +2,13 @@ resolver: lts-9.1
 
 packages:
 - '.'
-- location: https://github.com/carlohamalainen/amazonka.git 
- subdirs:
- - amazonka
- - core
- - amazonka-glacier
+- location:
+    git: git@github.com:carlohamalainen/amazonka
+    commit: 65dacf6d76dd712bfc18e34e9df36b5492f22bfa
+  subdirs:
+  - amazonka
+  - core
+  - amazonka-glacier
 
 extra-deps: []
 
