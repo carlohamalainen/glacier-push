@@ -229,8 +229,8 @@ completeMulti env region vault mp mu = do
 
 myEnv :: (MonadCatch m, MonadIO m) => m Env
 myEnv = do
-    env <- newEnv $ FromKeys (AccessKey "00000000000000000000") (SecretKey "0000000000000000000000000000000000000000")
-    lgr <- newLogger Trace stdout
+    env <- newEnv Discover
+    lgr <- newLogger Debug stdout
     return $ env & envLogger .~ lgr
 
 doWithRetries n action = do
@@ -245,9 +245,10 @@ doWithRetries n action = do
 main :: IO ()
 main = do
     let region = NorthVirginia
-        vault  = "myvault"
 
-    [path] <- getArgs
+    [vault', path] <- getArgs
+
+    let vault = cs vault'
 
     let myPartSize = 1024*oneMb
 
