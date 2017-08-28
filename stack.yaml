@@ -1,0 +1,15 @@
+resolver: lts-9.1
+
+packages:
+- '.'
+- location: https://github.com/carlohamalainen/amazonka.git 
+ subdirs:
+ - amazonka
+ - core
+ - amazonka-glacier
+
+extra-deps: []
+
+flags: {}
+
+extra-package-dbs: []
