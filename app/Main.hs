@@ -250,8 +250,8 @@ setDebug env = do
 -- on any other kind of exception.
 doWithRetries
     :: (KatipContext m, MonadIO m, MonadCatch m)
-    => Int  -- Number of retries.
-    -> m a  -- Action to run.
+    => Int  -- ^ Number of retries.
+    -> m a  -- ^ Action to run.
     -> m (Either Error a)
 doWithRetries n action = catch (Right <$> action) f
   where
