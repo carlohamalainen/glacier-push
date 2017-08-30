@@ -16,14 +16,16 @@ cabal-version:       >=1.10
 executable glacier-push-exe
   hs-source-dirs:      app
   main-is:             Main.hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:       base
                      , amazonka
                      , amazonka-core
                      , amazonka-glacier
                      , base16-bytestring
                      , bytestring
+                     , case-insensitive
                      , cryptohash-sha256
+                     , katip
                      , lens
                      , safe-exceptions
                      , string-conversions
