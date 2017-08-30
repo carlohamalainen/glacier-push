@@ -197,8 +197,13 @@ uploadOnePart env vault mu p = do
                     Nothing     -> throw MissingUploadID
                     Just uid    -> return uid
 
-    katipAddContext (sl "partStart" _partStart)
-      $ katipAddContext (sl "partEnd" _partEnd)
+    -- To avoid scientific notation in the Katip logs.
+    let start, end :: Text
+        start = cs $ show _partStart
+        end   = cs $ show _partEnd
+
+    katipAddContext (sl "partStart" start)
+      $ katipAddContext (sl "partEnd" end)
        $ do let cr  = contentRange _partStart _partEnd
 
                 ump = uploadMultipartPart accountId vault uploadId body
@@ -308,7 +313,7 @@ go vault' path = do
 
     partResponses <- forM (mp ^. multiParts) $ \p ->
         katipAddContext (sl "uploadId" uploadId) $
-        katipAddContext (sl "location" $ show $ mu ^. imursLocation) $ do
+        katipAddContext (sl "location" $ fromMaybe "(nothing)" $ mu ^. imursLocation) $ do
             doWithRetries 10 (uploadOnePart env vault mu p)
 
     case lefts partResponses of
