@@ -13,11 +13,14 @@ build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
 
-executable glacier-push-exe
-  hs-source-dirs:      app
-  main-is:             Main.hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
-  build-depends:       base
+library
+  hs-source-dirs:      src
+  exposed-modules:     Push
+  build-depends:       base >= 4.7 && < 5
+                     , base16-bytestring
+                     , bytestring
+                     , cryptohash-sha256
+                     , string-conversions
                      , amazonka
                      , amazonka-core
                      , amazonka-glacier
@@ -32,6 +35,31 @@ executable glacier-push-exe
                      , text
                      , unix-compat
                      , resourcet
+                     , QuickCheck
+  default-language:    Haskell2010
+
+executable glacier-push-exe
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
+  build-depends:       base
+                     , safe-exceptions
+                     , glacier-push
+                     , katip
+  default-language:    Haskell2010
+
+test-suite glacier-push-test
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+  build-depends:       base
+                     , bytestring
+                     , glacier-push
+                     , string-conversions
+                     , tasty
+                     , tasty-quickcheck
+                     , tasty-hunit
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 
 source-repository head
