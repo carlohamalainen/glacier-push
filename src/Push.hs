@@ -120,13 +120,15 @@ uploadArchiveSingle
     => Env                      -- ^ AWS Environment.
     -> Text                     -- ^ Vault name.
     -> FilePath                 -- ^ File to upload.
+    -> Text                     -- ^ Archive Description.
     -> m ArchiveCreationOutput  -- ^ Response.
-uploadArchiveSingle env vault f = do
+uploadArchiveSingle env vault f archiveDesc = do
     hash <- treeHash <$> readFile' f
     body <- toHashed <$> readFile' f
 
     let ua = uploadArchive vault accountId body
                 & uaChecksum .~ Just (cs hash)
+                & uaArchiveDescription .~ Just (cs archiveDesc)
 
     send' env ua
 
@@ -137,11 +139,13 @@ initiateMulti
     => Env                                  -- ^ AWS Environment.
     -> Text                                 -- ^ Vault name.
     -> Int64                                -- ^ Part size (bytes).
+    -> Text                                 -- ^ Archive Description.
     -> m InitiateMultipartUploadResponse    -- ^ Response.
-initiateMulti env vault _partSize = send' env mpu
+initiateMulti env vault _partSize archiveDesc = send' env mpu
   where
     mpu = initiateMultipartUpload accountId vault
             & imuPartSize .~ (Just $ cs $ show _partSize)
+            & imuArchiveDescription .~ (Just $ cs $ archiveDesc)
 
 -- | Helper for constructing a 'MultiPart'. Given the part size,
 -- this computes the hashes and part boundaries.
@@ -149,8 +153,9 @@ mkMultiPart
     :: forall m. (MonadCatch m, MonadIO m)
     => FilePath         -- ^ File.
     -> Int64            -- ^ Part size (bytes).
+    -> Text             -- ^ Archive Description.
     -> m MultiPart
-mkMultiPart _multipartPath _partSize = do
+mkMultiPart _multipartPath _partSize archiveDesc = do
     _multipartFullHash <- treeHash <$> readFile' _multipartPath
 
     _multipartArchiveSize <- fromIntegral <$> getFileSize' _multipartPath
@@ -282,11 +287,12 @@ go vault' path = do
     let vault = cs vault'
 
     let myPartSize = 128*oneMb
+        archiveDesc = cs path
 
-    mp  <- liftIO $ mkMultiPart path myPartSize
+    mp  <- liftIO $ mkMultiPart path myPartSize archiveDesc
 
     env <- liftIO $ newEnv'
-    mu  <- liftIO $ initiateMulti env vault myPartSize
+    mu  <- liftIO $ initiateMulti env vault myPartSize archiveDesc
 
     let uploadId = fromMaybe (error "No UploadId in response, can't continue multipart upload.")
                  $ mu ^. imursUploadId
