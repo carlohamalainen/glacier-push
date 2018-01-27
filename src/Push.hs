@@ -211,17 +211,19 @@ uploadOnePart env vault mu p = do
         start = cs $ show _partStart
         end   = cs $ show _partEnd
 
-    katipAddContext (sl "partStart" start)
-      $ katipAddContext (sl "partEnd" end)
-       $ do let cr  = contentRange _partStart _partEnd
+    katipAddContext (sl "vault" vault) $
+      katipAddContext (sl "path"  _path) $
+        katipAddContext (sl "partStart" start)
+          $ katipAddContext (sl "partEnd" end)
+           $ do let cr  = contentRange _partStart _partEnd
 
-                ump = uploadMultipartPart accountId vault uploadId body
-                            & umpChecksum .~ (Just $ cs $ p ^. partHash)
-                            & umpRange    .~ Just cr
+                    ump = uploadMultipartPart accountId vault uploadId body
+                                & umpChecksum .~ (Just $ cs $ p ^. partHash)
+                                & umpRange    .~ Just cr
 
-            $(logTM) InfoS "Uploading part."
+                $(logTM) InfoS "Uploading part."
 
-            send' env ump
+                send' env ump
 
   where
 
