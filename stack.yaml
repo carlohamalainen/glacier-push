@@ -1,17 +1,13 @@
-resolver: lts-9.1
+compiler: ghc-8.2.1
+resolver: nightly-2017-11-01
 
-packages:
-- '.'
-- location:
-    git: git@github.com:carlohamalainen/amazonka
-    commit: 65dacf6d76dd712bfc18e34e9df36b5492f22bfa
+packages: [.]
+
+extra-deps:
+- katip-0.5.4.0
+- git: git@github.com:carlohamalainen/amazonka
+  commit: b5e4e0d1ac9577e74d1f4e6ad922edf30a5bcd3a
   subdirs:
   - amazonka
   - core
   - amazonka-glacier
-
-extra-deps: []
-
-flags: {}
-
-extra-package-dbs: []
