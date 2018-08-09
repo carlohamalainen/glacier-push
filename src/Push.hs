@@ -37,6 +37,8 @@ import qualified Crypto.Hash                    as Hash
 import qualified Data.ByteString                as BS
 import qualified Data.CaseInsensitive           as CI
 
+import qualified Data.ByteArray as Memory
+
 type Hash = BS.ByteString
 
 chunkSize :: Int64
@@ -74,12 +76,13 @@ data MyException = MissingUploadID deriving (Show, Typeable)
 
 instance Exception MyException
 
+treeHashFile :: FilePath -> IO BS.ByteString
 treeHashFile filepath = do
     l <- leaves' filepath
     return $ treeHash' l
   where
     treeHash' []  = error "Internal error in treeHash'."
-    treeHash' [x] = x
+    treeHash' [x] = B16.encode x
     treeHash' xs  = treeHash' $ next xs
 
     leaves' filepath = do
@@ -91,12 +94,8 @@ treeHashFile filepath = do
             if eof
                 then return []
                 else do (h, chunk) <- hashOneMbChunk h
-                        let chunk' = toHexBS chunk
                         rest <- loop h
-                        return (chunk':rest)
-
-    toHexBS :: Hash.Digest Hash.SHA256 -> BS.ByteString
-    toHexBS = cs . show
+                        return (Memory.convert chunk : rest)
 
     hashOneMbChunk :: Handle -> IO (Handle, Hash.Digest Hash.SHA256)
     hashOneMbChunk h = loop h Hash.hashInit oneMb
@@ -107,9 +106,6 @@ treeHashFile filepath = do
           if BS.null chunk
             then return (h, Hash.hashFinalize context)
             else loop h (Hash.hashUpdate context chunk) (remaining - chunkSize)
-
-readFile' :: (MonadCatch m, MonadIO m) => String -> m BS.ByteString
-readFile' = liftIO . BS.readFile
 
 getFileSize' :: (MonadCatch m, MonadIO m) => FilePath -> m Integer
 getFileSize' f = liftIO $ withFile f ReadMode hFileSize
@@ -195,7 +191,7 @@ mkMultiPart
     -> Text             -- ^ Archive Description.
     -> m MultiPart
 mkMultiPart _multipartPath _partSize archiveDesc = do
-    _multipartFullHash <- treeHash <$> readFile' _multipartPath
+    _multipartFullHash <- liftIO $ treeHashFile _multipartPath
 
     _multipartArchiveSize <- fromIntegral <$> getFileSize' _multipartPath
 
@@ -348,7 +344,8 @@ go vault' path = do
 
     let vault = cs vault'
 
-    let myPartSize = 128*oneMb
+    -- let myPartSize = 128*oneMb
+    let myPartSize = oneMb
         archiveDesc = cs path
 
     mp  <- liftIO $ mkMultiPart path myPartSize archiveDesc
