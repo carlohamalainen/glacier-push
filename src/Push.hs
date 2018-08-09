@@ -31,7 +31,6 @@ import System.Exit
 import System.IO
 import Test.QuickCheck
 
-import qualified Crypto.Hash.SHA256             as SHA256
 import qualified Data.ByteString.Base16         as B16
 import qualified Crypto.Hash                    as Hash
 import qualified Data.ByteString                as BS
@@ -136,7 +135,7 @@ oneMbChunks x
   | otherwise            = BS.take (fromIntegral oneMb) x : oneMbChunks (BS.drop (fromIntegral oneMb) x)
 
 sha256 :: BS.ByteString -> BS.ByteString
-sha256 = cs . SHA256.hash
+sha256 x = Memory.convert (Hash.hash x :: Hash.Digest Hash.SHA256)
 
 -- | Send a request in the AWS monad transformer.
 send'
