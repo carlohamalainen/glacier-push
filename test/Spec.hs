@@ -39,6 +39,7 @@ treeHashUnitTests = map mkUnitTest tests
         , ("test006", "e",                                            "3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea")
         , ("test007", "f",                                            "252f10c83610ebca1a059c0bae8255eba2f95be4d1d7bcfa89d7248a82d9f111")
         , ("test007", "The quick brown fox jumps over the lazy dog.", "ef537f25c895bfa782526529a9b63d97aa631564d5d789c2b765448c8635fb6c")
+        , ("test008", replicate (fromIntegral $ 10*oneMb) 'x',        "c7deec06875f85e2e6e1e18fe93bdab37ca88376804e33ce89653d4344a6682e")
         ]
       where
         f (x, y, z) = (x, cs y, cs z)
