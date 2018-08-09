@@ -63,9 +63,12 @@ test-suite glacier-push-test
   hs-source-dirs:      test
   main-is:             Spec.hs
   build-depends:       base
+                     , base16-bytestring
                      , bytestring
                      , glacier-push
                      , string-conversions
+                     , cryptonite
+                     , memory
                      , tasty
                      , tasty-quickcheck
                      , tasty-hunit

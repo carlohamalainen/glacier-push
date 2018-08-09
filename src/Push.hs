@@ -75,37 +75,6 @@ data MyException = MissingUploadID deriving (Show, Typeable)
 
 instance Exception MyException
 
-treeHashFile :: FilePath -> IO BS.ByteString
-treeHashFile filepath = do
-    l <- leaves' filepath
-    return $ treeHash' l
-  where
-    treeHash' []  = error "Internal error in treeHash'."
-    treeHash' [x] = B16.encode x
-    treeHash' xs  = treeHash' $ next xs
-
-    leaves' filepath = do
-        h <- openFile filepath ReadMode
-        loop h
-      where
-        loop h = do
-            eof <- hIsEOF h
-            if eof
-                then return []
-                else do (h, chunk) <- hashOneMbChunk h
-                        rest <- loop h
-                        return (Memory.convert chunk : rest)
-
-    hashOneMbChunk :: Handle -> IO (Handle, Hash.Digest Hash.SHA256)
-    hashOneMbChunk h = loop h Hash.hashInit oneMb
-      where
-        loop h context 0 = return (h, Hash.hashFinalize context)
-        loop h !context !remaining = do
-          chunk <- BS.hGetSome h $ fromIntegral chunkSize
-          if BS.null chunk
-            then return (h, Hash.hashFinalize context)
-            else loop h (Hash.hashUpdate context chunk) (remaining - chunkSize)
-
 getFileSize' :: (MonadCatch m, MonadIO m) => FilePath -> m Integer
 getFileSize' f = liftIO $ withFile f ReadMode hFileSize
 
@@ -121,18 +90,50 @@ treeHash s = treeHash' $ leaves s
     treeHash' [x] = B16.encode x
     treeHash' xs  = treeHash' $ next xs
 
-leaves :: BS.ByteString -> [BS.ByteString]
-leaves s = map sha256 $ oneMbChunks s
+    leaves :: BS.ByteString -> [BS.ByteString]
+    leaves s = map sha256 $ oneMbChunks s
+
+    oneMbChunks :: BS.ByteString -> [BS.ByteString]
+    oneMbChunks x
+      | BS.length x <= (fromIntegral oneMb) = [x]
+      | otherwise            = BS.take (fromIntegral oneMb) x : oneMbChunks (BS.drop (fromIntegral oneMb) x)
 
 next :: [BS.ByteString] -> [BS.ByteString]
 next []       = []
 next [a]      = [a]
 next (a:b:xs) = sha256 (BS.append a b) : next xs
 
-oneMbChunks :: BS.ByteString -> [BS.ByteString]
-oneMbChunks x
-  | BS.length x <= (fromIntegral oneMb) = [x]
-  | otherwise            = BS.take (fromIntegral oneMb) x : oneMbChunks (BS.drop (fromIntegral oneMb) x)
+-- | Tree hash a file on-disk, avoiding the inefficiency of (cs . readFile).
+treeHashFile :: FilePath -> IO BS.ByteString
+treeHashFile filepath = do
+    l <- leaves' filepath
+    return $ treeHash' l
+  where
+    treeHash' []  = error "Internal error in treeHash'."
+    treeHash' [x] = B16.encode x
+    treeHash' xs  = treeHash' $ next xs
+
+    leaves' filepath = do
+        h <- openFile filepath ReadMode
+        loop h
+      where
+        loop h = do
+          eof <- hIsEOF h
+          if eof
+            then return []
+            else do (h, chunk) <- hashOneMbChunk h
+                    rest <- loop h
+                    return (Memory.convert chunk : rest)
+
+    hashOneMbChunk :: Handle -> IO (Handle, Hash.Digest Hash.SHA256)
+    hashOneMbChunk h = loop h Hash.hashInit oneMb
+      where
+        loop h context 0 = return (h, Hash.hashFinalize context)
+        loop h !context !remaining = do
+          chunk <- BS.hGetSome h $ fromIntegral chunkSize
+          if BS.null chunk
+            then return (h, Hash.hashFinalize context)
+            else loop h (Hash.hashUpdate context chunk) (remaining - chunkSize)
 
 sha256 :: BS.ByteString -> BS.ByteString
 sha256 x = Memory.convert (Hash.hash x :: Hash.Digest Hash.SHA256)
@@ -343,8 +344,7 @@ go vault' path = do
 
     let vault = cs vault'
 
-    -- let myPartSize = 128*oneMb
-    let myPartSize = oneMb
+    let myPartSize = 128*oneMb
         archiveDesc = cs path
 
     mp  <- liftIO $ mkMultiPart path myPartSize archiveDesc
