@@ -162,8 +162,8 @@ uploadArchiveSingle
     -> Text                     -- ^ Archive Description.
     -> m ArchiveCreationOutput  -- ^ Response.
 uploadArchiveSingle env vault f archiveDesc = do
-    hash <- treeHash <$> readFile' f
-    body <- toHashed <$> readFile' f
+    hash <- liftIO $ treeHashFile f
+    body <- toHashed <$> (liftIO . BS.readFile) f
 
     let ua = uploadArchive vault accountId body
                 & uaChecksum .~ Just (cs hash)
