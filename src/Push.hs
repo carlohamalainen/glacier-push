@@ -3,6 +3,7 @@
 {-# LANGUAGE RecordWildCards        #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TemplateHaskell        #-}
+{-# LANGUAGE BangPatterns           #-}
 
 module Push where
 
@@ -31,29 +32,33 @@ import System.IO
 import Test.QuickCheck
 
 import qualified Crypto.Hash.SHA256             as SHA256
-import qualified Data.ByteString.Base16.Lazy    as B16
-import qualified Data.ByteString.Lazy           as BS
+import qualified Data.ByteString.Base16         as B16
+import qualified Crypto.Hash                    as Hash
+import qualified Data.ByteString                as BS
 import qualified Data.CaseInsensitive           as CI
 
 type Hash = BS.ByteString
 
+chunkSize :: Int64
+chunkSize = 4096
+
 -- | Section of a file for a multipart upload. The start
 -- and end offsets are inclusive.
 data Part = Part
-    { _partStart    :: Int64
-    , _partEnd      :: Int64
-    , _partHash     :: Hash
-    , _path         :: FilePath
+    { _partStart    :: !Int64
+    , _partEnd      :: !Int64
+    , _partHash     :: !Hash
+    , _path         :: !FilePath
     }
   deriving (Show)
 
 -- | Things needed for a multipart upload.
 data MultiPart = MultiPart
-    { _multipartFullHash    :: Hash         -- ^ Hash of the whole file.
-    , _partSize             :: Int64        -- ^ Part size in bytes.
-    , _multiParts           :: [Part]       -- ^ Description of each part.
-    , _multipartPath        :: FilePath     -- ^ Path to the file.
-    , _multipartArchiveSize :: Int64        -- ^ Total archive (file) size.
+    { _multipartFullHash    :: !Hash         -- ^ Hash of the whole file.
+    , _partSize             :: !Int64        -- ^ Part size in bytes.
+    , _multiParts           :: ![Part]       -- ^ Description of each part.
+    , _multipartPath        :: !FilePath     -- ^ Path to the file.
+    , _multipartArchiveSize :: !Int64        -- ^ Total archive (file) size.
     }
   deriving (Show)
 
@@ -68,6 +73,40 @@ accountId = "-"
 data MyException = MissingUploadID deriving (Show, Typeable)
 
 instance Exception MyException
+
+treeHashFile filepath = do
+    l <- leaves' filepath
+    return $ treeHash' l
+  where
+    treeHash' []  = error "Internal error in treeHash'."
+    treeHash' [x] = x
+    treeHash' xs  = treeHash' $ next xs
+
+    leaves' filepath = do
+        h <- openFile filepath ReadMode
+        loop h
+      where
+        loop h = do
+            eof <- hIsEOF h
+            if eof
+                then return []
+                else do (h, chunk) <- hashOneMbChunk h
+                        let chunk' = toHexBS chunk
+                        rest <- loop h
+                        return (chunk':rest)
+
+    toHexBS :: Hash.Digest Hash.SHA256 -> BS.ByteString
+    toHexBS = cs . show
+
+    hashOneMbChunk :: Handle -> IO (Handle, Hash.Digest Hash.SHA256)
+    hashOneMbChunk h = loop h Hash.hashInit oneMb
+      where
+        loop h context 0 = return (h, Hash.hashFinalize context)
+        loop h !context !remaining = do
+          chunk <- BS.hGetSome h $ fromIntegral chunkSize
+          if BS.null chunk
+            then return (h, Hash.hashFinalize context)
+            else loop h (Hash.hashUpdate context chunk) (remaining - chunkSize)
 
 readFile' :: (MonadCatch m, MonadIO m) => String -> m BS.ByteString
 readFile' = liftIO . BS.readFile
@@ -97,11 +136,11 @@ next (a:b:xs) = sha256 (BS.append a b) : next xs
 
 oneMbChunks :: BS.ByteString -> [BS.ByteString]
 oneMbChunks x
-  | BS.length x <= oneMb = [x]
-  | otherwise            = BS.take oneMb x : oneMbChunks (BS.drop oneMb x)
+  | BS.length x <= (fromIntegral oneMb) = [x]
+  | otherwise            = BS.take (fromIntegral oneMb) x : oneMbChunks (BS.drop (fromIntegral oneMb) x)
 
 sha256 :: BS.ByteString -> BS.ByteString
-sha256 = cs . SHA256.hashlazy
+sha256 = cs . SHA256.hash
 
 -- | Send a request in the AWS monad transformer.
 send'
@@ -186,9 +225,30 @@ getPart
     => FilePath         -- ^ File to read.
     -> (Int64, Int64)   -- ^ First and last byte to read (inclusive).
     -> m BS.ByteString
-getPart path (start, end) = f <$> readFile' path
+getPart path (start, end) = liftIO $ do
+    h <- openFile path ReadMode
+    hSeek h AbsoluteSeek (fromIntegral start)
+    x <- BS.hGet h $ fromIntegral $ end - start + 1
+    hClose h
+    return x
+
+hashFile
+    :: (MonadCatch m, MonadIO m)
+    => FilePath         -- ^ File to read.
+    -> (Int64, Int64)   -- ^ First and last byte to read (inclusive).
+    -> m (Hash.Digest Hash.SHA256)
+hashFile fp (start, end) = liftIO $ withBinaryFile fp ReadMode $ \h -> do
+    hSeek h AbsoluteSeek (fromIntegral start)
+
+    loop h Hash.hashInit (end - start + 1)
+
   where
-    f = BS.take (end - start + 1) . BS.drop start
+    loop _ context 0 = return $ Hash.hashFinalize context
+    loop h !context !remaining = do
+      chunk <- BS.hGetSome h $ fromIntegral chunkSize
+      if BS.null chunk
+        then return $ Hash.hashFinalize context
+        else loop h (Hash.hashUpdate context chunk) (remaining - chunkSize)
 
 uploadOnePart
     :: (MonadCatch m, MonadIO m)
