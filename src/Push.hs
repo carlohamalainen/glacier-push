@@ -6,6 +6,7 @@
 
 module Push where
 
+import Control.DeepSeq ((<$!!>))
 import Control.Exception.Safe
 import Control.Lens
 import Control.Monad
@@ -156,7 +157,11 @@ mkMultiPart
     -> Text             -- ^ Archive Description.
     -> m MultiPart
 mkMultiPart _multipartPath _partSize archiveDesc = do
-    _multipartFullHash <- treeHash <$> readFile' _multipartPath
+    -- Need to force _multipartFullHash (using <$!!>)
+    -- otherwise we hit this on a large file:
+    --
+    -- treehash-exe: urandom_1000: openBinaryFile: resource exhausted (Too many open files)
+    _multipartFullHash <- treeHash <$!!> readFile' _multipartPath
 
     _multipartArchiveSize <- fromIntegral <$> getFileSize' _multipartPath
 
