@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric          #-}
+{-# LANGUAGE DeriveAnyClass         #-}
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE RecordWildCards        #-}
@@ -7,6 +9,8 @@
 
 module Push where
 
+import GHC.Generics (Generic)
+import Control.DeepSeq
 import Control.Exception.Safe
 import Control.Lens
 import Control.Monad
@@ -51,7 +55,7 @@ data Part = Part
     , _partHash     :: !Hash
     , _path         :: !FilePath
     }
-  deriving (Show)
+  deriving (Generic, NFData, Show)
 
 -- | Things needed for a multipart upload.
 data MultiPart = MultiPart
@@ -61,7 +65,7 @@ data MultiPart = MultiPart
     , _multipartPath        :: !FilePath     -- ^ Path to the file.
     , _multipartArchiveSize :: !Int64        -- ^ Total archive (file) size.
     }
-  deriving (Show)
+  deriving (Generic, NFData, Show)
 
 makeLenses ''Part
 makeLenses ''MultiPart
