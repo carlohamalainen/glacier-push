@@ -16,10 +16,10 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Push
+                     , TreehashFFI
   build-depends:       base >= 4.7 && < 5
                      , base16-bytestring
                      , bytestring
-                     , cryptohash-sha256
                      , string-conversions
                      , amazonka
                      , amazonka-core
@@ -27,17 +27,18 @@ library
                      , base16-bytestring
                      , bytestring
                      , case-insensitive
-                     , cryptohash-sha256
                      , katip
                      , lens
                      , safe-exceptions
                      , string-conversions
                      , text
                      , unix-compat
+                     , unix
                      , resourcet
                      , QuickCheck
                      , deepseq
   default-language:    Haskell2010
+  ghc-options:         -Wall
 
 executable glacier-push-exe
   hs-source-dirs:      app
@@ -48,6 +49,9 @@ executable glacier-push-exe
                      , glacier-push
                      , katip
   default-language:    Haskell2010
+  c-sources:           c/treehash.c
+  cc-options:          -Wall -O2 -fno-omit-frame-pointer
+  extra-libraries:     ssl crypto m
 
 executable treehash-exe
   hs-source-dirs:      app
@@ -58,7 +62,11 @@ executable treehash-exe
                      , glacier-push
                      , katip
                      , string-conversions
+                     , unix
   default-language:    Haskell2010
+  c-sources:           c/treehash.c
+  cc-options:          -Wall -O2 -fno-omit-frame-pointer
+  extra-libraries:     ssl crypto m
 
 test-suite glacier-push-test
   type:                exitcode-stdio-1.0

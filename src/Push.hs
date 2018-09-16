@@ -6,7 +6,6 @@
 
 module Push where
 
-import Control.DeepSeq ((<$!!>))
 import Control.Exception.Safe
 import Control.Lens
 import Control.Monad
@@ -26,15 +25,13 @@ import Network.AWS.Glacier.InitiateMultipartUpload
 import Network.AWS.Glacier.UploadArchive
 import Network.AWS.Glacier.UploadMultipartPart
 import Network.AWS.Data.Headers
-import System.Environment
 import System.Exit
 import System.IO
-import Test.QuickCheck
 
-import qualified Crypto.Hash.SHA256             as SHA256
-import qualified Data.ByteString.Base16.Lazy    as B16
 import qualified Data.ByteString.Lazy           as BS
 import qualified Data.CaseInsensitive           as CI
+
+import TreehashFFI
 
 type Hash = BS.ByteString
 
@@ -79,31 +76,6 @@ getFileSize' f = liftIO $ withFile f ReadMode hFileSize
 oneMb :: Int64
 oneMb = 1024*1024
 
--- | Compute a tree hash of a bytestring as described in
--- http://docs.aws.amazon.com/amazonglacier/latest/dev/checksum-calculations.html
-treeHash :: BS.ByteString -> Hash
-treeHash s = treeHash' $ leaves s
-  where
-    treeHash' []  = error "Internal error in treeHash'."
-    treeHash' [x] = B16.encode x
-    treeHash' xs  = treeHash' $ next xs
-
-leaves :: BS.ByteString -> [BS.ByteString]
-leaves s = map sha256 $ oneMbChunks s
-
-next :: [BS.ByteString] -> [BS.ByteString]
-next []       = []
-next [a]      = [a]
-next (a:b:xs) = sha256 (BS.append a b) : next xs
-
-oneMbChunks :: BS.ByteString -> [BS.ByteString]
-oneMbChunks x
-  | BS.length x <= oneMb = [x]
-  | otherwise            = BS.take oneMb x : oneMbChunks (BS.drop oneMb x)
-
-sha256 :: BS.ByteString -> BS.ByteString
-sha256 = cs . SHA256.hashlazy
-
 -- | Send a request in the AWS monad transformer.
 send'
     :: (MonadIO m,
@@ -124,12 +96,12 @@ uploadArchiveSingle
     -> Text                     -- ^ Archive Description.
     -> m ArchiveCreationOutput  -- ^ Response.
 uploadArchiveSingle env vault f archiveDesc = do
-    hash <- treeHash <$> readFile' f
+    hash <- liftIO $ treehash_FFI' f
     body <- toHashed <$> readFile' f
 
     let ua = uploadArchive vault accountId body
-                & uaChecksum .~ Just (cs hash)
-                & uaArchiveDescription .~ Just (cs archiveDesc)
+                & uaChecksum           ?~ cs hash
+                & uaArchiveDescription ?~ cs archiveDesc
 
     send' env ua
 
@@ -145,8 +117,8 @@ initiateMulti
 initiateMulti env vault _partSize archiveDesc = send' env mpu
   where
     mpu = initiateMultipartUpload accountId vault
-            & imuPartSize .~ (Just $ cs $ show _partSize)
-            & imuArchiveDescription .~ (Just $ cs $ archiveDesc)
+            & imuPartSize           ?~ cs (show _partSize)
+            & imuArchiveDescription ?~ cs archiveDesc
 
 -- | Helper for constructing a 'MultiPart'. Given the part size,
 -- this computes the hashes and part boundaries.
@@ -156,12 +128,8 @@ mkMultiPart
     -> Int64            -- ^ Part size (bytes).
     -> Text             -- ^ Archive Description.
     -> m MultiPart
-mkMultiPart _multipartPath _partSize archiveDesc = do
-    -- Need to force _multipartFullHash (using <$!!>)
-    -- otherwise we hit this on a large file:
-    --
-    -- treehash-exe: urandom_1000: openBinaryFile: resource exhausted (Too many open files)
-    _multipartFullHash <- treeHash <$!!> readFile' _multipartPath
+mkMultiPart _multipartPath _partSize _archiveDesc = do -- FIXME archive description is unused?...
+    _multipartFullHash <- cs <$> liftIO (treehash_FFI' _multipartPath)
 
     _multipartArchiveSize <- fromIntegral <$> getFileSize' _multipartPath
 
@@ -176,7 +144,7 @@ mkMultiPart _multipartPath _partSize archiveDesc = do
 
     mkPart :: (Int64, Int64) -> m Part
     mkPart (_partStart, _partEnd) = do
-        _partHash <- treeHash <$> getPart _multipartPath (_partStart, _partEnd)
+        _partHash <- cs <$> liftIO (treehash_FFI _multipartPath _partStart _partEnd)
         let _path = _multipartPath
         return Part{..}
 
@@ -191,9 +159,12 @@ getPart
     => FilePath         -- ^ File to read.
     -> (Int64, Int64)   -- ^ First and last byte to read (inclusive).
     -> m BS.ByteString
-getPart path (start, end) = f <$> readFile' path
-  where
-    f = BS.take (end - start + 1) . BS.drop start
+getPart path' (start, end) = liftIO $ do
+    h <- openFile path' ReadMode
+    hSeek h AbsoluteSeek (fromIntegral start)
+    x <- BS.hGet h $ fromIntegral $ end - start + 1
+    hClose h
+    return x
 
 uploadOnePart
     :: (MonadCatch m, MonadIO m)
@@ -223,8 +194,8 @@ uploadOnePart env vault mu p = do
            $ do let cr  = contentRange _partStart _partEnd
 
                     ump = uploadMultipartPart accountId vault uploadId body
-                                & umpChecksum .~ (Just $ cs $ p ^. partHash)
-                                & umpRange    .~ Just cr
+                                & umpChecksum ?~ cs (p ^. partHash)
+                                & umpRange    ?~ cr
 
                 $(logTM) InfoS "Uploading part."
 
@@ -250,8 +221,8 @@ completeMulti env vault mp mu = do
                     Just uid    -> return uid
 
     let cmu = completeMultipartUpload accountId vault uploadId
-                & cmuArchiveSize .~ (Just $ cs $ show $ mp ^. multipartArchiveSize)
-                & cmuChecksum    .~ (Just $ cs $ mp ^. multipartFullHash)
+                & cmuArchiveSize ?~ cs (show $ mp ^. multipartArchiveSize)
+                & cmuChecksum    ?~ cs (mp        ^. multipartFullHash)
 
     send' env cmu
 
@@ -288,17 +259,17 @@ doWithRetries n action = catch (Right <$> action) f
 
 -- | Do the needful.
 go :: String -> FilePath -> KatipContextT IO ()
-go vault' path = do
+go vault' path' = do
     $(logTM) InfoS "Startup."
 
     let vault = cs vault'
 
     let myPartSize = 128*oneMb
-        archiveDesc = cs path
+        archiveDesc = cs path'
 
-    mp  <- liftIO $ mkMultiPart path myPartSize archiveDesc
+    mp  <- liftIO $ mkMultiPart path' myPartSize archiveDesc
 
-    env <- liftIO $ newEnv'
+    env <- liftIO newEnv'
     mu  <- liftIO $ initiateMulti env vault myPartSize archiveDesc
 
     let uploadId = fromMaybe (error "No UploadId in response, can't continue multipart upload.")
@@ -306,7 +277,7 @@ go vault' path = do
 
     partResponses <- forM (mp ^. multiParts) $ \p ->
         katipAddContext (sl "uploadId" uploadId) $
-        katipAddContext (sl "location" $ fromMaybe "(nothing)" $ mu ^. imursLocation) $ do
+        katipAddContext (sl "location" $ fromMaybe "(nothing)" $ mu ^. imursLocation) $
             doWithRetries 10 (uploadOnePart env vault mu p)
 
     case lefts partResponses of
@@ -343,7 +314,7 @@ logServiceError msg (ServiceError e)
 
         in katipAddContext (sl "serviceMessage" smsg) $
             katipAddContext (sl "serviceCode" scode)  $
-             (headersAsContext $ e ^. serviceHeaders) $
+             headersAsContext (e ^. serviceHeaders)   $
                $(logTM) ErrorS msg
 
 logServiceError msg (TransportError e)
