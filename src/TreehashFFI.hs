@@ -9,11 +9,11 @@ import Foreign.C.Types
 import Foreign.C.String
 
 foreign import ccall "treehash.h treehash"
-     c_blappo :: CString -> CULong -> CULong -> IO CString
+     c_treehash :: CString -> CULong -> CULong -> IO CString
 
 treehash_FFI :: String -> Int64 -> Int64 -> IO String
 treehash_FFI filename start end = withCString filename $ \c_filename -> do
-        ptrHash <- c_blappo c_filename (fromIntegral start) (fromIntegral end)
+        ptrHash <- c_treehash c_filename (fromIntegral start) (fromIntegral end)
         h <- peekCString ptrHash
         free ptrHash
         return h
