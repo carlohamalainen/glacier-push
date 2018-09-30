@@ -17,13 +17,13 @@ main = do
     args <- getArgs
 
     case args of
-        [vault, fp] -> main' vault fp
-        _           -> putStrLn "Usage: glacier-push-exe <vault> <filename>"
+        [vault, path'] -> main' vault path'
+        _              -> putStrLn "Usage: glacier-push-exe <vault> <filename>"
 
   where
 
     main' :: String -> FilePath -> IO ()
-    main' vault fp = do
+    main' vault path' = do
         handleScribe <- mkHandleScribe ColorIfTerminal stdout InfoS V2
 
         let makeLogEnv = do e <- initLogEnv "glacier-push" "production"
@@ -34,4 +34,4 @@ main = do
 
         void $ bracket makeLogEnv closeScribes
              $ \le -> runKatipContextT le initialContext initialNamespace
-             $ go vault fp
+             $ go vault path'
