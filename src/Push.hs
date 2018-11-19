@@ -32,6 +32,7 @@ import Network.AWS.Glacier.UploadMultipartPart
 import Network.AWS.Data.Headers
 import System.Exit
 import System.IO
+import Text.Printf
 
 import qualified Data.ByteString.Lazy           as BS
 import qualified Data.CaseInsensitive           as CI
@@ -177,8 +178,10 @@ uploadOnePart
     -> Text                                 -- ^ Vault.
     -> InitiateMultipartUploadResponse      -- ^ Initiated multipart upload.
     -> Part                                 -- ^ A single part.
+    -> Int                                  -- ^ Index of this part.
+    -> Int                                  -- ^ Total number of parts.
     -> KatipContextT m UploadMultipartPartResponse
-uploadOnePart env vault mu p = do
+uploadOnePart env vault mu p thisPartIndex nrParts = do
     let Part{..} = p
 
     body <- toHashed <$> getPart _path (_partStart, _partEnd)
@@ -192,19 +195,29 @@ uploadOnePart env vault mu p = do
         start = cs $ show _partStart
         end   = cs $ show _partEnd
 
+        pc :: Double
+        pc = fromIntegral thisPartIndex / fromIntegral nrParts
+
+        percentageComplete :: String
+        percentageComplete = printf "%0.2f" pc
+
+        percentageComplete' :: Text
+        percentageComplete' = cs percentageComplete
+
     katipAddContext (sl "vault" vault) $
-      katipAddContext (sl "path"  _path) $
-        katipAddContext (sl "partStart" start)
-          $ katipAddContext (sl "partEnd" end)
-           $ do let cr  = contentRange _partStart _partEnd
+     katipAddContext (sl "path"  _path) $
+      katipAddContext (sl "partStart" start) $
+       katipAddContext (sl "partEnd" end) $
+        katipAddContext (sl "percentageComplete" percentageComplete') $ do
+         let cr  = contentRange _partStart _partEnd
 
-                    ump = uploadMultipartPart accountId vault uploadId body
-                                & umpChecksum ?~ cs (p ^. partHash)
-                                & umpRange    ?~ cr
+             ump = uploadMultipartPart accountId vault uploadId body
+                       & umpChecksum ?~ cs (p ^. partHash)
+                       & umpRange    ?~ cr
 
-                $(logTM) InfoS "Uploading part."
+         $(logTM) InfoS "Uploading part."
 
-                send' env ump
+         send' env ump
 
   where
 
@@ -280,10 +293,12 @@ go vault' path' = do
     let uploadId = fromMaybe (error "No UploadId in response, can't continue multipart upload.")
                  $ mu ^. imursUploadId
 
-    partResponses <- forM (mp ^. multiParts) $ \p ->
+    let nrParts = length $ mp ^. multiParts
+
+    partResponses <- forM (zip [0..] (mp ^. multiParts)) $ \(i, p) ->
         katipAddContext (sl "uploadId" uploadId) $
         katipAddContext (sl "location" $ fromMaybe "(nothing)" $ mu ^. imursLocation) $
-            doWithRetries 10 (uploadOnePart env vault mu p)
+            doWithRetries 10 (uploadOnePart env vault mu p i nrParts)
 
     case lefts partResponses of
         []   -> do $(logTM) InfoS "All parts uploaded successfully, now completing the multipart upload."
