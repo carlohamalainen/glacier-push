@@ -9,54 +9,7 @@
 
 #define DIGEST_SIZE 32  // SHA256 digest
 
-// https://wiki.openssl.org/index.php/EVP_Signing_and_Verifying#Calculating_HMAC
-void HMAC_sha256(unsigned char *msg, size_t mlen, unsigned char **val, size_t *vlen, EVP_PKEY *pkey)
-{
-    const EVP_MD *md;
-    EVP_MD_CTX *ctx;
-
-    ctx = EVP_MD_CTX_new();
-
-    md = EVP_get_digestbyname("SHA256");
-    assert(md != NULL);
-
-    EVP_DigestInit_ex(ctx, md, NULL);
-
-    EVP_DigestSignInit(ctx, NULL, md, NULL, pkey);
-    EVP_DigestSignUpdate(ctx, msg, mlen);
-
-    size_t req = 0;
-    EVP_DigestSignFinal(ctx, NULL, &req);
-    assert(req > 0);
-
-    *val = OPENSSL_malloc(req);
-    assert(*val != NULL);
-
-    *vlen = req;
-    EVP_DigestSignFinal(ctx, *val, vlen);
-    assert(req == *vlen);
-}
-
-void foo()
-{
-    unsigned char password[] = "password";
-
-    EVP_PKEY *pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, password, strlen((char *)password));
-
-    unsigned char msg[] = "hello world";
-    size_t mlen = strlen((char *)msg);
-
-    unsigned char *val;
-    size_t vlen;
-
-    HMAC_sha256(msg, mlen, &val, &vlen, pkey);
-
-    for(int i = 0; i < vlen; i++)
-        printf("%02x", val[i]);
-    printf("\n");
-}
-
-
+// https://www.openssl.org/docs/manmaster/man3/EVP_DigestInit.html#EXAMPLE
 void sha256(unsigned char *buffer, unsigned int buffer_size, unsigned char *output) 
 {
     EVP_MD_CTX *mdctx;
