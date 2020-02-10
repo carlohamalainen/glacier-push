@@ -24,7 +24,7 @@ main = do
 
     main' :: String -> FilePath -> IO ()
     main' vault path' = do
-        handleScribe <- mkHandleScribe ColorIfTerminal stdout InfoS V2
+        handleScribe <- mkHandleScribe ColorIfTerminal stdout (return . const True) V2
 
         let makeLogEnv = do e <- initLogEnv "glacier-push" "production"
                             registerScribe "stdout" handleScribe defaultScribeSettings e

@@ -17,26 +17,30 @@ library
   hs-source-dirs:      src
   exposed-modules:     Push
                      , TreehashFFI
-  build-depends:       base >= 4.7 && < 5
-                     , base16-bytestring
-                     , bytestring
-                     , string-conversions
-                     , amazonka
+  build-depends:       amazonka
                      , amazonka-core
                      , amazonka-glacier
+                     , base
                      , base16-bytestring
                      , bytestring
                      , case-insensitive
+                     , cryptohash-sha256
+                     , cryptonite
+                     , deepseq
                      , katip
+                     , katip 
                      , lens
+                     , memory
+                     , QuickCheck
+                     , resourcet
                      , safe-exceptions
                      , string-conversions
+                     , tasty
+                     , tasty-hunit
+                     , tasty-quickcheck
                      , text
-                     , unix-compat
                      , unix
-                     , resourcet
-                     , QuickCheck
-                     , deepseq
+                     , unix-compat
   default-language:    Haskell2010
   ghc-options:         -Wall
 
@@ -44,10 +48,33 @@ executable glacier-push-exe
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
-  build-depends:       base
-                     , safe-exceptions
-                     , glacier-push
+  build-depends:       amazonka
+                     , amazonka-core
+                     , amazonka-glacier
+                     , base
+                     , base16-bytestring
+                     , bytestring
+                     , case-insensitive
+                     , cryptohash-sha256
+                     , cryptonite
+                     , deepseq
                      , katip
+                     , katip 
+                     , lens
+                     , memory
+                     , QuickCheck
+                     , resourcet
+                     , safe-exceptions
+                     , string-conversions
+                     , tasty
+                     , tasty-hunit
+                     , tasty-quickcheck
+                     , text
+                     , unix
+                     , unix-compat
+
+                     , glacier-push
+
   default-language:    Haskell2010
   c-sources:           c/treehash.c
   cc-options:          -Wall -O2 -fno-omit-frame-pointer
@@ -57,17 +84,33 @@ executable treehash-exe
   hs-source-dirs:      app
   main-is:             Treehash.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
-  build-depends:       base
-                     , bytestring
+  build-depends:       amazonka
+                     , amazonka-core
+                     , amazonka-glacier
+                     , base
                      , base16-bytestring
+                     , bytestring
+                     , case-insensitive
                      , cryptohash-sha256
-                     , safe-exceptions
-                     , glacier-push
-                     , katip
-                     , string-conversions
-                     , unix
                      , cryptonite
+                     , deepseq
+                     , katip
+                     , katip 
+                     , lens
                      , memory
+                     , QuickCheck
+                     , resourcet
+                     , safe-exceptions
+                     , string-conversions
+                     , tasty
+                     , tasty-hunit
+                     , tasty-quickcheck
+                     , text
+                     , unix
+                     , unix-compat
+
+                     , glacier-push
+
   default-language:    Haskell2010
   c-sources:           c/treehash.c
   cc-options:          -Wall -O2 -fno-omit-frame-pointer
@@ -77,16 +120,31 @@ test-suite glacier-push-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
-  build-depends:       base
+  build-depends:       amazonka
+                     , amazonka-core
+                     , amazonka-glacier
+                     , base
                      , base16-bytestring
                      , bytestring
-                     , glacier-push
-                     , string-conversions
+                     , case-insensitive
+                     , cryptohash-sha256
                      , cryptonite
+                     , deepseq
+                     , katip
+                     , katip 
+                     , lens
                      , memory
+                     , QuickCheck
+                     , resourcet
+                     , safe-exceptions
+                     , string-conversions
                      , tasty
-                     , tasty-quickcheck
                      , tasty-hunit
+                     , tasty-quickcheck
+                     , text
+                     , unix
+                     , unix-compat
+
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 

@@ -1,12 +1,12 @@
-compiler: ghc-8.2.1
-resolver: lts-11.9
+compiler: ghc-8.6.5
+resolver: lts-14.24
 
 packages: [.]
 
 extra-deps:
-- katip-0.5.4.0
+- http-client-0.5.14@sha256:4880b27d6741e331454a1d4c887d96ce3d7d625322c8433983a4b1cd08538577,5348
 - git: git@github.com:carlohamalainen/amazonka
-  commit: 0be280ededb58cad71c82c0f241e1eb8d326fd07
+  commit: 19a9f91e1ff47a1a880c55827ea8a93037ecdc8e
   subdirs:
   - amazonka
   - core
