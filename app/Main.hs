@@ -34,4 +34,4 @@ main = do
 
         void $ bracket makeLogEnv closeScribes
              $ \le -> runKatipContextT le initialContext initialNamespace
-             $ go vault path'
+             $ go (Just 64) vault path'

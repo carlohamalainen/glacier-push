@@ -23,6 +23,7 @@ import Data.Maybe
 import Data.String.Conversions              (cs)
 import Data.Text                            (append, Text)
 import Katip
+import Katip.Core (LogStr(..))
 import Network.AWS
 import Network.AWS.Data
 import Network.AWS.Glacier.CompleteMultipartUpload
@@ -35,6 +36,7 @@ import System.IO
 import Text.Printf
 
 import qualified Data.ByteString.Lazy           as BS
+import qualified Data.Text.Lazy.Builder         as Builder
 import qualified Data.CaseInsensitive           as CI
 
 import TreehashFFI
@@ -272,17 +274,18 @@ doWithRetries n action = catch (Right <$> action) f
         | otherwise = do $(logTM) ErrorS "Too many errors, giving up."
                          return $ Left $ ServiceError e
 
-    f e = do $(logTM) ErrorS "Some other kind of error in doWithRetries, giving up."
+    f e = do $(logTM) ErrorS ("Some other kind of error in doWithRetries, giving up: "
+                                <> (LogStr $ Builder.fromString $ show e))
              return $ Left e
 
 -- | Do the needful.
-go :: String -> FilePath -> KatipContextT IO ()
-go vault' path' = do
+go :: Maybe Int64 -> String -> FilePath -> KatipContextT IO ()
+go mPartSizeMb vault' path' = do
     $(logTM) InfoS "Startup."
 
     let vault = cs vault'
 
-    let myPartSize = 128*oneMb
+    let myPartSize = (fromMaybe 128 mPartSizeMb)*oneMb
         archiveDesc = cs path'
 
     mp  <- liftIO $ mkMultiPart path' myPartSize archiveDesc
