@@ -8,8 +8,8 @@ Verified to build with this version of stack:
 
 Building:
 
-    stack build
-    stack install
+    cabal v2-build
+    cabal v2-install --installdir=$HOME/opt/glacier-push-bin
 
 Usage:
 
