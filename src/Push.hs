@@ -15,7 +15,7 @@ import Control.Exception.Safe
 import Control.Lens
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Trans.AWS              (AWST', runAWST)
+-- import Control.Monad.Trans.AWS              (AWST', runAWST)
 import Control.Monad.Trans.Resource
 import Data.Int
 import Data.Either
@@ -23,14 +23,7 @@ import Data.Maybe
 import Data.String.Conversions              (cs)
 import Data.Text                            (append, Text)
 import Katip
-import Katip.Core (LogStr(..))
-import Network.AWS
-import Network.AWS.Data
-import Network.AWS.Glacier.CompleteMultipartUpload
-import Network.AWS.Glacier.InitiateMultipartUpload
-import Network.AWS.Glacier.UploadArchive
-import Network.AWS.Glacier.UploadMultipartPart
-import Network.AWS.Data.Headers
+
 import System.Exit
 import System.IO
 import Text.Printf
@@ -40,6 +33,11 @@ import qualified Data.Text.Lazy.Builder         as Builder
 import qualified Data.CaseInsensitive           as CI
 
 import TreehashFFI
+
+import qualified Amazonka as AWS
+import qualified Amazonka.Glacier as Glacier
+import qualified Amazonka.Glacier.Lens                      as Glacier
+import qualified Amazonka.Glacier.InitiateMultipartUpload   as Glacer
 
 type Hash = BS.ByteString
 
@@ -84,49 +82,44 @@ getFileSize' f = liftIO $ withFile f ReadMode hFileSize
 oneMb :: Int64
 oneMb = 1024*1024
 
--- | Send a request in the AWS monad transformer.
 send'
-    :: (MonadIO m,
-        HasEnv e,
-        MonadAWS (AWST' e (ResourceT IO)),
-        AWSRequest a)
-    => e        -- ^ Environment (e.g. 'Env').
-    -> a        -- ^ Request to send, e.g. 'UploadMultipartPart'.
-    -> m (Rs a) -- ^ Response.
-send' env x = liftIO $ runResourceT . runAWST env $ send x
+    :: (MonadUnliftIO m, AWS.AWSRequest a)
+    => AWS.Env
+    -> a
+    -> m (AWS.AWSResponse a)
+send' env x = AWS.runResourceT $ AWS.send env x
 
 -- | Upload an archive in one go.
 uploadArchiveSingle
-    :: (MonadCatch m, MonadIO m)
-    => Env                      -- ^ AWS Environment.
+    :: (MonadCatch m, MonadIO m, MonadUnliftIO m)
+    => AWS.Env                  -- ^ AWS Environment.
     -> Text                     -- ^ Vault name.
     -> FilePath                 -- ^ File to upload.
     -> Text                     -- ^ Archive Description.
-    -> m ArchiveCreationOutput  -- ^ Response.
+    -> m Glacier.ArchiveCreationOutput  -- ^ Response.
 uploadArchiveSingle env vault f archiveDesc = do
     hash <- liftIO $ treehash_FFI' f
-    body <- toHashed <$> (liftIO . BS.readFile) f
+    body <- AWS.toHashed <$> (liftIO . BS.readFile) f
 
-    let ua = uploadArchive vault accountId body
-                & uaChecksum           ?~ cs hash
-                & uaArchiveDescription ?~ cs archiveDesc
+    let ua = Glacier.newUploadArchive vault accountId body
+                & Glacier.uploadArchive_checksum            ?~ cs hash
+                & Glacier.uploadArchive_archiveDescription  ?~ cs archiveDesc
 
     send' env ua
 
 -- | Initiate a multipart upload. We don't need the
 -- file name here, just its size.
 initiateMulti
-    :: (MonadCatch m, MonadIO m)
-    => Env                                  -- ^ AWS Environment.
+    :: (MonadCatch m, MonadIO m, MonadUnliftIO m)
+    => AWS.Env                              -- ^ AWS Environment.
     -> Text                                 -- ^ Vault name.
     -> Int64                                -- ^ Part size (bytes).
     -> Text                                 -- ^ Archive Description.
-    -> m InitiateMultipartUploadResponse    -- ^ Response.
+    -> m Glacier.InitiateMultipartUploadResponse    -- ^ Response.
 initiateMulti env vault _partSize archiveDesc = send' env mpu
   where
-    mpu = initiateMultipartUpload accountId vault
-            & imuPartSize           ?~ cs (show _partSize)
-            & imuArchiveDescription ?~ cs archiveDesc
+    mpu = Glacier.newInitiateMultipartUpload accountId vault (cs $ show _partSize)
+            & Glacier.initiateMultipartUpload_archiveDescription ?~ cs archiveDesc
 
 -- | Helper for constructing a 'MultiPart'. Given the part size,
 -- this computes the hashes and part boundaries.
@@ -138,6 +131,8 @@ mkMultiPart
     -> m MultiPart
 mkMultiPart _multipartPath _partSize _archiveDesc = do -- FIXME archive description is unused?...
     _multipartFullHash <- cs <$> liftIO (treehash_FFI' _multipartPath)
+
+    liftIO $ print ("_multipartFullHash"::Text, _multipartFullHash)
 
     _multipartArchiveSize <- fromIntegral <$> getFileSize' _multipartPath
 
@@ -153,6 +148,9 @@ mkMultiPart _multipartPath _partSize _archiveDesc = do -- FIXME archive descript
     mkPart :: (Int64, Int64) -> m Part
     mkPart (_partStart, _partEnd) = do
         _partHash <- cs <$> liftIO (treehash_FFI _multipartPath _partStart _partEnd)
+
+        liftIO $ print ("part"::Text, show _partStart, show _partEnd, _partHash)
+
         let _path = _multipartPath
         return Part{..}
 
@@ -175,20 +173,20 @@ getPart path' (start, end) = liftIO $ do
     return x
 
 uploadOnePart
-    :: (MonadCatch m, MonadIO m)
-    => Env                                  -- ^ AWS Environment.
+    :: (MonadCatch m, MonadIO m, MonadUnliftIO m)
+    => AWS.Env                              -- ^ AWS Environment.
     -> Text                                 -- ^ Vault.
-    -> InitiateMultipartUploadResponse      -- ^ Initiated multipart upload.
+    -> Glacier.InitiateMultipartUploadResponse -- ^ Initiated multipart upload.
     -> Part                                 -- ^ A single part.
     -> Int                                  -- ^ Index of this part.
     -> Int                                  -- ^ Total number of parts.
-    -> KatipContextT m UploadMultipartPartResponse
+    -> KatipContextT m Glacier.UploadMultipartPartResponse
 uploadOnePart env vault mu p thisPartIndex nrParts = do
     let Part{..} = p
 
-    body <- toHashed <$> getPart _path (_partStart, _partEnd)
+    body <- AWS.toHashed <$> getPart _path (_partStart, _partEnd)
 
-    uploadId <- case mu ^. imursUploadId of
+    uploadId <- case mu ^. Glacier.initiateMultipartUploadResponse_uploadId of
                     Nothing     -> throw MissingUploadID
                     Just uid    -> return uid
 
@@ -200,8 +198,11 @@ uploadOnePart env vault mu p thisPartIndex nrParts = do
         pc :: Double
         pc = fromIntegral thisPartIndex / fromIntegral nrParts
 
+        pc' :: Int
+        pc' = floor $ 100*pc
+
         percentageComplete :: String
-        percentageComplete = printf "%0.2f" pc
+        percentageComplete = printf "%02d" pc'
 
         percentageComplete' :: Text
         percentageComplete' = cs percentageComplete
@@ -212,11 +213,7 @@ uploadOnePart env vault mu p thisPartIndex nrParts = do
        katipAddContext (sl "partEnd" end) $
         katipAddContext (sl "percentageComplete" percentageComplete') $ do
          let cr  = contentRange _partStart _partEnd
-
-             ump = uploadMultipartPart accountId vault uploadId body
-                       & umpChecksum ?~ cs (p ^. partHash)
-                       & umpRange    ?~ cr
-
+             ump = Glacier.newUploadMultipartPart accountId vault uploadId cr (cs (p ^. partHash)) body
          $(logTM) InfoS "Uploading part."
 
          send' env ump
@@ -229,33 +226,31 @@ uploadOnePart env vault mu p thisPartIndex nrParts = do
 -- | Complete a multipart upload. All parts must have been successfully uploaded, otherwise
 -- this will fail.
 completeMulti
-    :: (MonadCatch m, MonadIO m)
-    => Env                                  -- ^ AWS Environment
+    :: (MonadCatch m, MonadIO m, MonadUnliftIO m)
+    => AWS.Env                              -- ^ AWS Environment
     -> Text                                 -- ^ Vault
     -> MultiPart                            -- ^ Multipart info.
-    -> InitiateMultipartUploadResponse      -- ^ Response from when the multipart upload was initiated.
-    -> m ArchiveCreationOutput
+    -> Glacier.InitiateMultipartUploadResponse      -- ^ Response from when the multipart upload was initiated.
+    -> m Glacier.ArchiveCreationOutput
 completeMulti env vault mp mu = do
-    uploadId <- case mu ^. imursUploadId of
+    uploadId <- case mu ^. Glacer.initiateMultipartUploadResponse_uploadId of
                     Nothing     -> throw MissingUploadID
                     Just uid    -> return uid
 
-    let cmu = completeMultipartUpload accountId vault uploadId
-                & cmuArchiveSize ?~ cs (show $ mp ^. multipartArchiveSize)
-                & cmuChecksum    ?~ cs (mp        ^. multipartFullHash)
+    let cmu = Glacier.newCompleteMultipartUpload accountId vault uploadId (cs $ show $ mp ^. multipartArchiveSize) (cs $ mp ^. multipartFullHash)
 
     send' env cmu
 
 -- | Discover credentials in the environment.
-newEnv' :: (MonadCatch m, MonadIO m) => m Env
-newEnv' = newEnv Discover
+newEnv' :: (MonadCatch m, MonadIO m) => m AWS.Env
+newEnv' = AWS.newEnv AWS.Discover
 
 -- | Add debug-level log output (handy for seeing
 -- all the requests).
-setDebug :: (MonadCatch m, MonadIO m) => Env -> m Env
+setDebug :: (MonadCatch m, MonadIO m) => AWS.Env -> m AWS.Env
 setDebug env = do
-    lgr <- newLogger Debug stdout
-    return $ env & envLogger .~ lgr
+    lgr <- AWS.newLogger AWS.Debug stdout
+    return $ env { AWS._envLogger = lgr } -- FIXME need to set a region here???
 
 -- | Try to run an action, and keep retrying if we catch
 -- a 'ServiceError' (e.g. a 408 timeout from Glacier). Don't retry
@@ -264,28 +259,27 @@ doWithRetries
     :: (KatipContext m, MonadIO m, MonadCatch m)
     => Int  -- ^ Number of retries.
     -> m a  -- ^ Action to run.
-    -> m (Either Error a)
+    -> m (Either AWS.Error a)
 doWithRetries n action = catch (Right <$> action) f
   where
-    f (ServiceError e)
-        | n > 0     = do logServiceError "doWithRetries action failed." (ServiceError e)
+    f (AWS.ServiceError e)
+        | n > 0     = do logServiceError "doWithRetries action failed." $ AWS.ServiceError e
                          doWithRetries (n-1) action
 
         | otherwise = do $(logTM) ErrorS "Too many errors, giving up."
-                         return $ Left $ ServiceError e
+                         return $ Left $ AWS.ServiceError e
 
     f e = do $(logTM) ErrorS ("Some other kind of error in doWithRetries, giving up: "
-                                <> (LogStr $ Builder.fromString $ show e))
+                                <> LogStr (Builder.fromString $ show e))
              return $ Left e
 
--- | Do the needful.
 go :: Maybe Int64 -> String -> FilePath -> KatipContextT IO ()
 go mPartSizeMb vault' path' = do
     $(logTM) InfoS "Startup."
 
     let vault = cs vault'
 
-    let myPartSize = (fromMaybe 128 mPartSizeMb)*oneMb
+    let myPartSize = fromMaybe 128 mPartSizeMb * oneMb
         archiveDesc = cs path'
 
     mp  <- liftIO $ mkMultiPart path' myPartSize archiveDesc
@@ -294,22 +288,22 @@ go mPartSizeMb vault' path' = do
     mu  <- liftIO $ initiateMulti env vault myPartSize archiveDesc
 
     let uploadId = fromMaybe (error "No UploadId in response, can't continue multipart upload.")
-                 $ mu ^. imursUploadId
+                 $ mu ^. Glacer.initiateMultipartUploadResponse_uploadId
 
     let nrParts = length $ mp ^. multiParts
 
     partResponses <- forM (zip [0..] (mp ^. multiParts)) $ \(i, p) ->
         katipAddContext (sl "uploadId" uploadId) $
-        katipAddContext (sl "location" $ fromMaybe "(nothing)" $ mu ^. imursLocation) $
+        katipAddContext (sl "location" $ fromMaybe "(nothing)" $ mu ^. Glacier.initiateMultipartUploadResponse_location) $
             doWithRetries 10 (uploadOnePart env vault mu p i nrParts)
 
     case lefts partResponses of
         []   -> do $(logTM) InfoS "All parts uploaded successfully, now completing the multipart upload."
                    catch (do completeResponse <- completeMulti env vault mp mu
                              katipAddContext (sl "uploadId" uploadId)                             $
-                              katipAddContext (sl "archiveId" $ completeResponse ^. acoArchiveId) $
-                               katipAddContext (sl "checksum" $ completeResponse ^. acoChecksum ) $
-                                katipAddContext (sl "location" $ completeResponse ^. acoLocation) $ do
+                              katipAddContext (sl "archiveId" $ completeResponse ^. Glacier.archiveCreationOutput_archiveId) $
+                               katipAddContext (sl "checksum" $ completeResponse ^. Glacier.archiveCreationOutput_checksum) $
+                                katipAddContext (sl "location" $ completeResponse ^. Glacier.archiveCreationOutput_location) $ do
                                   $(logTM) InfoS "Done"
                                   liftIO exitSuccess)
                          (\e -> do logServiceError "Failed to complete multipart upload." e
@@ -326,37 +320,37 @@ go mPartSizeMb vault' path' = do
 logServiceError
     :: (KatipContext m, Monad m)
     => LogStr
-    -> Error
+    -> AWS.Error
     -> m ()
-logServiceError msg (ServiceError e)
+logServiceError msg (AWS.ServiceError e)
     = let smsg :: Text
-          smsg = toText $ fromMaybe "" $ e ^. serviceMessage
+          smsg = AWS.toText $ fromMaybe "" $ e ^. AWS.serviceMessage
 
           scode :: Text
-          scode = toText $ e ^. serviceCode
+          scode = AWS.toText $ e ^. AWS.serviceCode
 
         in katipAddContext (sl "serviceMessage" smsg) $
             katipAddContext (sl "serviceCode" scode)  $
-             headersAsContext (e ^. serviceHeaders)   $
+             headersAsContext (e ^. AWS.serviceHeaders)   $
                $(logTM) ErrorS msg
 
-logServiceError msg (TransportError e)
+logServiceError msg (AWS.TransportError e)
     = let txt :: Text
-          txt = toText $ show e
+          txt = AWS.toText $ show e
         in katipAddContext (sl "TransportError" txt) $
             $(logTM) ErrorS msg
 
-logServiceError msg (SerializeError e)
+logServiceError msg (AWS.SerializeError e)
     = let txt :: Text
-          txt = toText $ show e
+          txt = AWS.toText $ show e
         in katipAddContext (sl "SerializeError" txt) $
             $(logTM) ErrorS msg
 
 -- | Turn each header into a context for the structured log.
-headersAsContext :: KatipContext m => [Header] -> m a -> m a
+headersAsContext :: KatipContext m => [AWS.Header] -> m a -> m a
 headersAsContext hs = foldl (.) id $ map headerToContext hs
   where
-    headerToContext :: KatipContext m => Header -> m a -> m a
+    headerToContext :: KatipContext m => AWS.Header -> m a -> m a
     headerToContext (h, x) = let h' = cs $ CI.original h :: Text
                                  x' = cs x               :: Text
                                in katipAddContext (sl h' x')

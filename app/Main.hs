@@ -4,13 +4,13 @@
 
 module Main where
 
-import Push
+import Push ( go )
 
-import Control.Exception.Safe
-import Control.Monad
+import Control.Exception.Safe ( bracket )
+import Control.Monad ( void )
 import Katip
-import System.Environment
-import System.IO
+import System.Environment ( getArgs )
+import System.IO ( stdout )
 
 main :: IO ()
 main = do
@@ -26,8 +26,9 @@ main = do
     main' vault path' = do
         handleScribe <- mkHandleScribe ColorIfTerminal stdout (return . const True) V2
 
-        let makeLogEnv = do e <- initLogEnv "glacier-push" "production"
-                            registerScribe "stdout" handleScribe defaultScribeSettings e
+        let makeLogEnv = initLogEnv "glacier-push" "production" 
+                            >>= 
+                         registerScribe "stdout" handleScribe defaultScribeSettings
 
             initialContext   = ()
             initialNamespace = "main"
