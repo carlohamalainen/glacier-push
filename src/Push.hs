@@ -20,7 +20,7 @@ import Control.Monad.Trans.Resource
 import Data.Int
 import Data.Either
 import Data.Maybe
-import Data.String.Conversions              (cs)
+import Data.String.Conversions
 import Data.Text                            (append, Text)
 import Katip
 
@@ -83,7 +83,7 @@ oneMb :: Int64
 oneMb = 1024*1024
 
 send'
-    :: (MonadUnliftIO m, AWS.AWSRequest a)
+    :: (MonadUnliftIO m, AWS.AWSRequest a, Typeable a, Typeable (AWS.AWSResponse a))
     => AWS.Env
     -> a
     -> m (AWS.AWSResponse a)
@@ -186,9 +186,7 @@ uploadOnePart env vault mu p thisPartIndex nrParts = do
 
     body <- AWS.toHashed <$> getPart _path (_partStart, _partEnd)
 
-    uploadId <- case mu ^. Glacier.initiateMultipartUploadResponse_uploadId of
-                    Nothing     -> throw MissingUploadID
-                    Just uid    -> return uid
+    let uploadId = mu ^. Glacier.initiateMultipartUploadResponse_uploadId
 
     -- To avoid scientific notation in the Katip logs.
     let start, end :: Text
@@ -233,24 +231,21 @@ completeMulti
     -> Glacier.InitiateMultipartUploadResponse      -- ^ Response from when the multipart upload was initiated.
     -> m Glacier.ArchiveCreationOutput
 completeMulti env vault mp mu = do
-    uploadId <- case mu ^. Glacer.initiateMultipartUploadResponse_uploadId of
-                    Nothing     -> throw MissingUploadID
-                    Just uid    -> return uid
-
-    let cmu = Glacier.newCompleteMultipartUpload accountId vault uploadId (cs $ show $ mp ^. multipartArchiveSize) (cs $ mp ^. multipartFullHash)
+    let uploadId = mu ^. Glacer.initiateMultipartUploadResponse_uploadId
+        cmu = Glacier.newCompleteMultipartUpload accountId vault uploadId (cs $ show $ mp ^. multipartArchiveSize) (cs $ mp ^. multipartFullHash)
 
     send' env cmu
 
 -- | Discover credentials in the environment.
 newEnv' :: (MonadCatch m, MonadIO m) => m AWS.Env
-newEnv' = AWS.newEnv AWS.Discover
+newEnv' = AWS.newEnv AWS.discover
 
 -- | Add debug-level log output (handy for seeing
 -- all the requests).
 setDebug :: (MonadCatch m, MonadIO m) => AWS.Env -> m AWS.Env
 setDebug env = do
     lgr <- AWS.newLogger AWS.Debug stdout
-    return $ env { AWS._envLogger = lgr } -- FIXME need to set a region here???
+    return $ env { AWS.logger = lgr } -- FIXME need to set a region here???
 
 -- | Try to run an action, and keep retrying if we catch
 -- a 'ServiceError' (e.g. a 408 timeout from Glacier). Don't retry
@@ -287,8 +282,7 @@ go mPartSizeMb vault' path' = do
     env <- liftIO newEnv'
     mu  <- liftIO $ initiateMulti env vault myPartSize archiveDesc
 
-    let uploadId = fromMaybe (error "No UploadId in response, can't continue multipart upload.")
-                 $ mu ^. Glacer.initiateMultipartUploadResponse_uploadId
+    let uploadId = mu ^. Glacer.initiateMultipartUploadResponse_uploadId
 
     let nrParts = length $ mp ^. multiParts
 
@@ -324,33 +318,41 @@ logServiceError
     -> m ()
 logServiceError msg (AWS.ServiceError e)
     = let smsg :: Text
-          smsg = AWS.toText $ fromMaybe "" $ e ^. AWS.serviceMessage
+          smsg = fromMaybe "" $ e ^? AWS.serviceError_message . _Just . to AWS.fromErrorMessage
 
           scode :: Text
-          scode = AWS.toText $ e ^. AWS.serviceCode
+          scode = e ^. AWS.serviceError_code . AWS._ErrorCode
 
         in katipAddContext (sl "serviceMessage" smsg) $
             katipAddContext (sl "serviceCode" scode)  $
-             headersAsContext (e ^. AWS.serviceHeaders)   $
+             headersAsContext (e ^. AWS.serviceError_headers)   $
                $(logTM) ErrorS msg
 
 logServiceError msg (AWS.TransportError e)
     = let txt :: Text
-          txt = AWS.toText $ show e
+          txt = cs $ show e
         in katipAddContext (sl "TransportError" txt) $
             $(logTM) ErrorS msg
 
 logServiceError msg (AWS.SerializeError e)
     = let txt :: Text
-          txt = AWS.toText $ show e
+          txt = cs $ show e
         in katipAddContext (sl "SerializeError" txt) $
             $(logTM) ErrorS msg
 
 -- | Turn each header into a context for the structured log.
-headersAsContext :: KatipContext m => [AWS.Header] -> m a -> m a
+headersAsContext
+    :: (KatipContext m, ConvertibleStrings h Text, ConvertibleStrings v Text)
+    => [(CI.CI h, v)]
+    -> m a
+    -> m a
 headersAsContext hs = foldl (.) id $ map headerToContext hs
   where
-    headerToContext :: KatipContext m => AWS.Header -> m a -> m a
+    headerToContext
+        :: (KatipContext m, ConvertibleStrings h Text, ConvertibleStrings v Text)
+        => (CI.CI h, v)
+        -> m a
+        -> m a
     headerToContext (h, x) = let h' = cs $ CI.original h :: Text
                                  x' = cs x               :: Text
                                in katipAddContext (sl h' x')
