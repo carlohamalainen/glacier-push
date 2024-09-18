@@ -1,3 +1,7 @@
+# deprecated
+
+Use https://github.com/carlohamalainen/glacier-push-go instead.
+
 # glacier-push
 
 Use the amazonka API to push files to Amazon Glacier.
